@@ -867,6 +867,6 @@ char *add_xterm_umid(char *base)
 		return base;
 	}
 
-	snprintf(title, len, "%s (%s)", base, umid);
+	snprintf(title, len, "%s (%s)", umid, base);
 	return title;
 }
