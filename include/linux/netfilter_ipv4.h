@@ -48,7 +48,11 @@
 #define NF_IP_LOCAL_OUT		3
 /* Packets about to hit the wire. */
 #define NF_IP_POST_ROUTING	4
-#define NF_IP_NUMHOOKS		5
+/* Packets going into XFRM input transformation. */
+#define NF_IP_XFRM_IN		5
+/* Packets going into XFRM output transformation. */
+#define NF_IP_XFRM_OUT		6
+#define NF_IP_NUMHOOKS		7
 #endif /* ! __KERNEL__ */
 
 enum nf_ip_hook_priorities {

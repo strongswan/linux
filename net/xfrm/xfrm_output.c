@@ -38,6 +38,13 @@ static int xfrm_state_check_space(struct xfrm_state *x, struct sk_buff *skb)
 	return pskb_expand_head(skb, nhead, ntail, GFP_ATOMIC);
 }
 
+static int xfrm_type_output(struct sk_buff *skb)
+{
+	struct xfrm_state *x = skb_dst(skb)->xfrm;
+
+	return x->type->output(x, skb);
+}
+
 static int xfrm_output_one(struct sk_buff *skb, int err)
 {
 	struct dst_entry *dst = skb_dst(skb);
@@ -85,8 +92,9 @@ static int xfrm_output_one(struct sk_buff *skb, int err)
 
 		spin_unlock_bh(&x->lock);
 
-		err = x->type->output(x, skb);
-		if (err == -EINPROGRESS)
+		err = NF_HOOK(dst->ops->family, NF_INET_XFRM_OUT, skb,
+			      NULL, dst->dev, xfrm_type_output);
+		if (err == -EINPROGRESS || err == -EPERM)
 			goto out_exit;
 
 resume:

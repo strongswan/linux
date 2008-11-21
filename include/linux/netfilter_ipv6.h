@@ -52,7 +52,11 @@
 #define NF_IP6_LOCAL_OUT		3
 /* Packets about to hit the wire. */
 #define NF_IP6_POST_ROUTING	4
-#define NF_IP6_NUMHOOKS		5
+/* Packets going into XFRM input transformation. */
+#define NF_IP6_XFRM_IN		5
+/* Packets going into XFRM output transformation. */
+#define NF_IP6_XFRM_OUT		6
+#define NF_IP6_NUMHOOKS		7
 #endif /* ! __KERNEL__ */
 
 
