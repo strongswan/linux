@@ -4,6 +4,7 @@
  * Licensed under the GPL
  */
 
+#include "linux/kmod.h"
 #include <linux/console.h>
 #include <linux/ctype.h>
 #include <linux/string.h>
@@ -21,6 +22,8 @@
 #include <linux/un.h>
 #include <linux/workqueue.h>
 #include <linux/mutex.h>
+#include <linux/completion.h>
+#include <linux/file.h>
 #include <asm/uaccess.h>
 
 #include "init.h"
@@ -190,6 +193,73 @@ void mconsole_proc(struct mc_request *req)
 }
 #endif
 
+void mconsole_exec(struct mc_request *req)
+{
+	DECLARE_COMPLETION_ONSTACK(done);
+	struct subprocess_info *sub_info;
+	int res, len;
+	struct file *out;
+	char buf[MCONSOLE_MAX_DATA];
+
+	char *envp[] = {
+		"HOME=/", "TERM=linux",
+		"PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin",
+		NULL
+	};
+	char *argv[] = {
+		"/bin/sh", "-c",
+		req->request.data + strlen("exec "),
+		NULL
+	};
+
+	sub_info = call_usermodehelper_setup("/bin/sh", argv, envp, GFP_ATOMIC);
+	if (sub_info == NULL) {
+		mconsole_reply(req, "call_usermodehelper_setup failed", 1, 0);
+		return;
+	}
+
+	sub_info->stdout = create_write_pipe(0);
+	if (IS_ERR(sub_info->stdout)) {
+		call_usermodehelper_freeinfo(sub_info);
+		mconsole_reply(req, "creating stdout write pipe failed", 1, 0);
+		return;
+	}
+	out = create_read_pipe(sub_info->stdout, 0);
+	if (IS_ERR(out)) {
+		free_write_pipe(sub_info->stdout);
+		sub_info->stdout = NULL;
+		mconsole_reply(req, "creating stdout read pipe failed", 1, 0);
+		return;
+	}
+
+	sub_info->complete = &done;
+
+	res = call_usermodehelper_exec(sub_info, UMH_WAIT_EXT);
+	if (res < 0) {
+		call_usermodehelper_freeinfo(sub_info);
+		mconsole_reply(req, "call_usermodehelper_exec failed", 1, 0);
+		return;
+	}
+
+	for (;;) {
+		len = out->f_op->read(out, buf, sizeof(buf), &out->f_pos);
+		if (len < 0) {
+			mconsole_reply(req, "reading output failed", 1, 0);
+			break;
+		}
+		if (len == 0)
+			break;
+		mconsole_reply_len(req, buf, len, 0, 1);
+	}
+	fput(out);
+
+	wait_for_completion(&done);
+	res = sub_info->retval >> 8;
+	call_usermodehelper_freeinfo(sub_info);
+
+	mconsole_reply_len(req, buf, len, res, 0);
+}
+
 void mconsole_proc(struct mc_request *req)
 {
 	char path[64];
@@ -260,6 +330,7 @@ void mconsole_proc(struct mc_request *req)
     stop - pause the UML; it will do nothing until it receives a 'go' \n\
     go - continue the UML after a 'stop' \n\
     log <string> - make UML enter <string> into the kernel log\n\
+    exec <string> - pass <string> to /bin/sh -c synchronously\n\
     proc <file> - returns the contents of the UML's /proc/<file>\n\
     stack <pid> - returns the stack of the specified pid\n\
 "

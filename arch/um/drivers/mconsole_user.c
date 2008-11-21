@@ -32,6 +32,7 @@ static struct mconsole_command commands[] = {
 	{ "stop", mconsole_stop, MCONSOLE_PROC },
 	{ "go", mconsole_go, MCONSOLE_INTR },
 	{ "log", mconsole_log, MCONSOLE_INTR },
+	{ "exec", mconsole_exec, MCONSOLE_PROC },
 	{ "proc", mconsole_proc, MCONSOLE_PROC },
 	{ "stack", mconsole_stack, MCONSOLE_INTR },
 };

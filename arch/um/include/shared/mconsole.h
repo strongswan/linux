@@ -85,6 +85,7 @@ extern void mconsole_cad(struct mc_request *req);
 extern void mconsole_stop(struct mc_request *req);
 extern void mconsole_go(struct mc_request *req);
 extern void mconsole_log(struct mc_request *req);
+extern void mconsole_exec(struct mc_request *req);
 extern void mconsole_proc(struct mc_request *req);
 extern void mconsole_stack(struct mc_request *req);
 
