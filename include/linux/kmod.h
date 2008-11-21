@@ -46,21 +46,27 @@ static inline int request_module_nowait(const char *name, ...) { return -ENOSYS;
 
 struct key;
 struct file;
+struct completion;
 
 enum umh_wait {
 	UMH_NO_WAIT = -1,	/* don't wait at all */
 	UMH_WAIT_EXEC = 0,	/* wait for the exec, but not the process */
 	UMH_WAIT_PROC = 1,	/* wait for the process to complete */
+	UMH_WAIT_EXT = 2,	/* wait for the exec then return and signal
+				   when the process is complete */
 };
 
 struct subprocess_info {
 	struct work_struct work;
 	struct completion *complete;
+	struct completion *executed;
 	char *path;
 	char **argv;
 	char **envp;
 	enum umh_wait wait;
 	int retval;
+	struct file *stdin;
+	struct file *stdout;
 	int (*init)(struct subprocess_info *info);
 	void (*cleanup)(struct subprocess_info *info);
 	void *data;

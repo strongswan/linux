@@ -96,7 +96,7 @@ int __request_module(bool wait, const char *fmt, ...)
 	 * would be to run the parents of this process, counting how many times
 	 * kmod was invoked.  That would mean accessing the internals of the
 	 * process tables to get the command line, proc_pid_cmdline is static
-	 * and it is not worth changing the proc code just to handle this case. 
+	 * and it is not worth changing the proc code just to handle this case.
 	 * KAO.
 	 *
 	 * "trace the ppid" is simple, but will fail if someone's
@@ -137,6 +137,41 @@ static int ____call_usermodehelper(void *data)
 	spin_lock_irq(&current->sighand->siglock);
 	flush_signal_handlers(current, 1);
 	spin_unlock_irq(&current->sighand->siglock);
+
+	/* Install input pipe when needed */
+	if (sub_info->stdin) {
+		struct files_struct *f = current->files;
+		struct fdtable *fdt;
+		/* no races because files should be private here */
+		sys_close(0);
+		fd_install(0, sub_info->stdin);
+		spin_lock(&f->file_lock);
+		fdt = files_fdtable(f);
+		FD_SET(0, fdt->open_fds);
+		FD_CLR(0, fdt->close_on_exec);
+		spin_unlock(&f->file_lock);
+	}
+	if (sub_info->stdout) {
+		struct files_struct *f = current->files;
+		struct fdtable *fdt;
+
+		sys_close(1);
+		sys_close(2);
+		get_file(sub_info->stdout);
+		fd_install(1, sub_info->stdout);
+		fd_install(2, sub_info->stdout);
+		spin_lock(&f->file_lock);
+		fdt = files_fdtable(f);
+		FD_SET(1, fdt->open_fds);
+		FD_CLR(1, fdt->close_on_exec);
+		FD_SET(2, fdt->open_fds);
+		FD_CLR(2, fdt->close_on_exec);
+		spin_unlock(&f->file_lock);
+	}
+	if (sub_info->stdin || sub_info->stdout) {
+		/* disallow core files */
+		current->signal->rlim[RLIMIT_CORE] = (struct rlimit){0, 0};
+	}
 
 	/* We can run anywhere, unlike our parent keventd(). */
 	set_cpus_allowed_ptr(current, cpu_all_mask);
@@ -222,7 +257,7 @@ static void __call_usermodehelper(struct work_struct *work)
 	/* CLONE_VFORK: wait until the usermode helper has execve'd
 	 * successfully We need the data structures to stay around
 	 * until that is done.  */
-	if (wait == UMH_WAIT_PROC)
+	if (wait == UMH_WAIT_PROC || wait == UMH_NO_WAIT || wait == UMH_WAIT_EXT)
 		pid = kernel_thread(wait_for_helper, sub_info,
 				    CLONE_FS | CLONE_FILES | SIGCHLD);
 	else
@@ -232,6 +267,16 @@ static void __call_usermodehelper(struct work_struct *work)
 	switch (wait) {
 	case UMH_NO_WAIT:
 		call_usermodehelper_freeinfo(sub_info);
+		break;
+
+	case UMH_WAIT_EXT:
+		if (pid > 0) {
+			complete(sub_info->executed);
+			break;
+		}
+		sub_info->retval = pid;
+		complete(sub_info->executed);
+		complete(sub_info->complete);
 		break;
 
 	case UMH_WAIT_PROC:
@@ -401,15 +446,22 @@ int call_usermodehelper_exec(struct subprocess_info *sub_info,
 		goto out;
 	}
 
-	sub_info->complete = &done;
+	if (wait == UMH_WAIT_EXT)
+		sub_info->executed = &done;
+	else
+		sub_info->complete = &done;
+
 	sub_info->wait = wait;
 
 	queue_work(khelper_wq, &sub_info->work);
 	if (wait == UMH_NO_WAIT)	/* task has freed sub_info */
 		goto unlock;
-	wait_for_completion(&done);
-	retval = sub_info->retval;
 
+	wait_for_completion(&done);
+
+	retval = sub_info->retval;
+	if (wait == UMH_WAIT_EXT)	/* caller will free sub_info */
+		goto unlock;
 out:
 	call_usermodehelper_freeinfo(sub_info);
 unlock:
