@@ -283,6 +283,7 @@ enum xfrm_attr_type_t {
 	XFRMA_KMADDRESS,        /* struct xfrm_user_kmaddress */
 	XFRMA_ALG_AUTH_TRUNC,	/* struct xfrm_algo_auth */
 	XFRMA_MARK,		/* struct xfrm_mark */
+	XFRMA_TFC,		/* struct xfrm_tfc */
 	__XFRMA_MAX
 
 #define XFRMA_MAX (__XFRMA_MAX - 1)
@@ -291,6 +292,12 @@ enum xfrm_attr_type_t {
 struct xfrm_mark {
 	__u32           v; /* value */
 	__u32           m; /* mask */
+};
+
+struct xfrm_tfc {
+	__u16		pad;
+	__u16		flags;
+#define XFRM_TFC_ESPV3	1	/* RFC4303 TFC padding, if possible */
 };
 
 enum xfrm_sadattr_type_t {

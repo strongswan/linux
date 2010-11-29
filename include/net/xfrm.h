@@ -143,6 +143,7 @@ struct xfrm_state {
 	struct xfrm_id		id;
 	struct xfrm_selector	sel;
 	struct xfrm_mark	mark;
+	struct xfrm_tfc		tfc;
 
 	u32			genid;
 
