@@ -156,8 +156,6 @@ static int esp6_output(struct xfrm_state *x, struct sk_buff *skb)
 
 	blksize = ALIGN(crypto_aead_blocksize(aead), 4);
 	clen = ALIGN(clen + 2, blksize);
-	if (esp->padlen)
-		clen = ALIGN(clen, esp->padlen);
 
 	if ((err = skb_cow_data(skb, clen - skb->len + alen, &trailer)) < 0)
 		goto error;
@@ -337,12 +335,11 @@ static u32 esp6_get_mtu(struct xfrm_state *x, int mtu)
 {
 	struct esp_data *esp = x->data;
 	u32 blksize = ALIGN(crypto_aead_blocksize(esp->aead), 4);
-	u32 align = max_t(u32, blksize, esp->padlen);
 	u32 rem;
 
 	mtu -= x->props.header_len + crypto_aead_authsize(esp->aead);
-	rem = mtu & (align - 1);
-	mtu &= ~(align - 1);
+	rem = mtu & (blksize - 1);
+	mtu &= ~(blksize - 1);
 
 	if (x->props.mode != XFRM_MODE_TUNNEL) {
 		u32 padsize = ((blksize - 1) & 7) + 1;
@@ -516,8 +513,6 @@ static int esp6_init_state(struct xfrm_state *x)
 
 	aead = esp->aead;
 
-	esp->padlen = 0;
-
 	x->props.header_len = sizeof(struct ip_esp_hdr) +
 			      crypto_aead_ivsize(aead);
 	switch (x->props.mode) {
@@ -536,8 +531,6 @@ static int esp6_init_state(struct xfrm_state *x)
 	}
 
 	align = ALIGN(crypto_aead_blocksize(aead), 4);
-	if (esp->padlen)
-		align = max_t(u32, align, esp->padlen);
 	x->props.trailer_len = align + 1 + crypto_aead_authsize(esp->aead);
 
 error:
