@@ -23,6 +23,8 @@ struct esp_skb_cb {
 
 #define ESP_SKB_CB(__skb) ((struct esp_skb_cb *)&((__skb)->cb[0]))
 
+static u32 esp4_get_mtu(struct xfrm_state *x, int mtu);
+
 /*
  * Allocate an AEAD request structure with extra space for SG and IV.
  *
@@ -133,6 +135,11 @@ static int esp_output(struct xfrm_state *x, struct sk_buff *skb)
 	blksize = ALIGN(crypto_aead_blocksize(aead), 4);
 	tfclen = 0;
 	tfcpadto = x->tfc.pad;
+	if (x->tfc.flags & XFRM_TFC_PMTU) {
+		struct xfrm_dst *dst = (struct xfrm_dst *)skb_dst(skb);
+
+		tfcpadto = esp4_get_mtu(x, dst->child_mtu_cached);
+	}
 
 	if (skb->len >= tfcpadto) {
 		clen = ALIGN(skb->len + 2, blksize);

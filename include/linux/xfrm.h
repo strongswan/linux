@@ -298,6 +298,7 @@ struct xfrm_tfc {
 	__u16		pad;
 	__u16		flags;
 #define XFRM_TFC_ESPV3	1	/* RFC4303 TFC padding, if possible */
+#define XFRM_TFC_PMTU	2	/* ignore pad field, pad to PMTU */
 };
 
 enum xfrm_sadattr_type_t {
