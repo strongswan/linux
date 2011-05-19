@@ -21,6 +21,7 @@
 #include <linux/udp.h>
 #include <linux/icmp.h>
 #include <linux/if_arp.h>
+#include <linux/etherdevice.h>
 #include <linux/seq_file.h>
 #include <linux/netfilter_arp.h>
 #include <linux/netfilter/x_tables.h>
@@ -31,8 +32,9 @@
 #include <net/netns/generic.h>
 #include <net/checksum.h>
 #include <net/ip.h>
+#include <net/xfrm.h>
 
-#define CLUSTERIP_VERSION "0.8"
+#define CLUSTERIP_VERSION "0.9"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Harald Welte <laforge@netfilter.org>");
@@ -136,6 +138,20 @@ __clusterip_config_find(struct net *net, __be32 clusterip)
 	return NULL;
 }
 
+static struct clusterip_config *
+__clusterip_config_find_mac(struct net *net, u_int8_t clustermac[])
+{
+	struct clusterip_config *c;
+	struct clusterip_net *cn = net_generic(net, clusterip_net_id);
+
+	list_for_each_entry_rcu(c, &cn->configs, list) {
+		if (memcmp(c->clustermac, clustermac, ETH_ALEN) == 0)
+			return c;
+	}
+
+	return NULL;
+}
+
 static inline struct clusterip_config *
 clusterip_config_find_get(struct net *net, __be32 clusterip, int entry)
 {
@@ -148,6 +164,22 @@ clusterip_config_find_get(struct net *net, __be32 clusterip, int entry)
 			c = NULL;
 		else if (entry)
 			atomic_inc(&c->entries);
+	}
+	rcu_read_unlock_bh();
+
+	return c;
+}
+
+static inline struct clusterip_config *
+clusterip_config_find_get_mac(struct net *net, u_int8_t clustermac[])
+{
+	struct clusterip_config *c;
+
+	rcu_read_lock_bh();
+	c = __clusterip_config_find_mac(net, clustermac);
+	if (c) {
+		if (unlikely(!atomic_inc_not_zero(&c->refcount)))
+			c = NULL;
 	}
 	rcu_read_unlock_bh();
 
@@ -236,7 +268,14 @@ clusterip_del_node(struct clusterip_config *c, u_int16_t nodenum)
 
 	return true;
 }
-#endif
+#endif /* CONFIG_PROC_FS */
+
+static inline u_int32_t
+clusterip_hash_to_node(const struct clusterip_config *c, unsigned long hash)
+{
+	/* node numbers are 1..n, not 0..n */
+	return reciprocal_scale(hash, c->num_total_nodes) + 1;
+}
 
 static inline u_int32_t
 clusterip_hashfn(const struct sk_buff *skb,
@@ -284,8 +323,7 @@ clusterip_hashfn(const struct sk_buff *skb,
 		break;
 	}
 
-	/* node numbers are 1..n, not 0..n */
-	return reciprocal_scale(hashval, config->num_total_nodes) + 1;
+	return clusterip_hash_to_node(config, hashval);
 }
 
 static inline int
@@ -314,12 +352,34 @@ clusterip_tg(struct sk_buff *skb, const struct xt_action_param *par)
 	if (ct == NULL)
 		return NF_DROP;
 
-	/* special case: ICMP error handling. conntrack distinguishes between
-	 * error messages (RELATED) and information requests (see below) */
-	if (ip_hdr(skb)->protocol == IPPROTO_ICMP &&
-	    (ctinfo == IP_CT_RELATED ||
-	     ctinfo == IP_CT_RELATED_REPLY))
+	switch (ip_hdr(skb)->protocol) {
+	case IPPROTO_ICMP:
+		/* ICMP error handling: conntrack distinguishes between error
+		 * messages (RELATED) and information requests (see below)
+		 */
+		if (ctinfo == IP_CT_RELATED ||
+		    ctinfo == IP_CT_RELATED_REPLY)
+			return XT_CONTINUE;
+		break;
+#ifdef CONFIG_XFRM
+	case IPPROTO_ESP:
+	case IPPROTO_AH:
+	case IPPROTO_IPIP:
+		/* responsibility for IPsec is handled in xfrm input hook */
 		return XT_CONTINUE;
+	case IPPROTO_UDP: {
+		/* UDP 4500 with an SPI is encapsulated ESP */
+		const struct iphdr *iph = ip_hdr(skb);
+		const u_int16_t *halfs = (const void *)iph+iph->ihl*4;
+
+		if (halfs[1] == htons(4500) && (halfs[4] || halfs[5]))
+			return XT_CONTINUE;
+		break;
+	}
+#endif /* CONFIG_XFRM */
+	default:
+		break;
+	}
 
 	/* ip_conntrack_icmp guarantees us that we only have ICMP_ECHO,
 	 * TIMESTAMP, INFO_REQUEST or ADDRESS type icmp packets from here
@@ -558,6 +618,162 @@ static struct nf_hook_ops cip_arp_ops __read_mostly = {
 };
 
 /***********************************************************************
+ * IPSEC FORWARDING HOOKS
+ ***********************************************************************/
+
+#ifdef CONFIG_XFRM
+
+static unsigned int
+cip_pre_routing_hook(const struct nf_hook_ops *ops,
+		     struct sk_buff *skb,
+		     const struct net_device *in,
+		     const struct net_device *out,
+		     int (*okfn)(struct sk_buff *))
+{
+	struct net *net = dev_net(in ? in : out);
+
+	if (skb_mac_header(skb) < skb->head ||
+	    skb_mac_header(skb) + ETH_HLEN > skb->data ||
+	    !is_multicast_ether_addr(eth_hdr(skb)->h_dest))
+		return NF_ACCEPT;
+
+	/* if we receive a packet for a CLUSTERIP multicast address,
+	 * we let it pass through ip_forward.
+	 */
+	if (__clusterip_config_find_mac(net, eth_hdr(skb)->h_dest))
+		skb->pkt_type = PACKET_HOST;
+
+	return NF_ACCEPT;
+}
+
+static struct nf_hook_ops cip_pre_routing_ops __read_mostly = {
+	.hook		= cip_pre_routing_hook,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_INET_PRE_ROUTING,
+	.priority	= -1,
+};
+
+static inline u_int32_t
+clusterip_hashfn_xfrm(const struct xfrm_state *x,
+		      const struct clusterip_config *config)
+{
+	unsigned long hashval;
+
+	hashval = jhash_2words(ntohl(x->id.daddr.a4), ntohl(x->id.spi),
+			       config->hash_initval);
+	return clusterip_hash_to_node(config, hashval);
+}
+
+/* interval to process packet not responsible */
+#define SEQ_UPDATE_MASK 0x0F
+
+static unsigned int
+cip_xfrm_in_hook(const struct nf_hook_ops *ops,
+		 struct sk_buff *skb,
+		 const struct net_device *in,
+		 const struct net_device *out,
+		 int (*okfn)(struct sk_buff *))
+{
+	struct net *net = dev_net(in ? in : out);
+	struct clusterip_config *c;
+	struct xfrm_state *x;
+	u_int32_t hash;
+	__be32 seq;
+	unsigned int res = NF_DROP;
+
+	x = skb->sp->xvec[skb->sp->len - 1];
+
+	switch (x->id.proto) {
+	case IPPROTO_ESP:
+	case IPPROTO_AH:
+		break;
+	case IPPROTO_IPIP:
+	case IPPROTO_COMP:
+		/* FIXME: Accept IPCOMP if packet was encrypted only */
+	default:
+		return NF_ACCEPT;
+	}
+
+	c = clusterip_config_find_get(net, x->id.daddr.a4, 0);
+	if (!c)
+		return NF_ACCEPT;
+
+	/* process every n-th packet to update sequence counter, but drop it */
+	hash = clusterip_hashfn_xfrm(x, c);
+	seq = XFRM_SKB_CB(skb)->seq.input.low;
+	if (clusterip_responsible(c, hash))
+		res = NF_ACCEPT;
+	else if ((ntohl(seq) & SEQ_UPDATE_MASK) == 0) {
+		if (x->type->input(x, skb) > 0) {
+			spin_lock(&x->lock);
+
+			x->repl->advance(x, seq);
+
+			spin_unlock(&x->lock);
+		}
+	}
+	clusterip_config_put(c);
+	return res;
+}
+
+static struct nf_hook_ops cip_xfrm_in_ops __read_mostly = {
+	.hook		= cip_xfrm_in_hook,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_INET_XFRM_IN,
+	.priority	= -1,
+};
+
+static unsigned int
+cip_xfrm_out_hook(const struct nf_hook_ops *ops,
+		  struct sk_buff *skb,
+		  const struct net_device *in,
+		  const struct net_device *out,
+		  int (*okfn)(struct sk_buff *))
+{
+	struct net *net = dev_net(in ? in : out);
+	struct clusterip_config *c;
+	struct xfrm_state *x;
+	u_int32_t hash;
+	unsigned int res = NF_DROP;
+
+	x = skb_dst(skb)->xfrm;
+
+	switch (x->id.proto) {
+	case IPPROTO_ESP:
+	case IPPROTO_AH:
+		break;
+	case IPPROTO_IPIP:
+	case IPPROTO_COMP:
+		/* FIXME: Skip IPCOMP processing if we are not responsible */
+	default:
+		return NF_ACCEPT;
+	}
+
+	c = clusterip_config_find_get(net, x->props.saddr.a4, 0);
+	if (!c)
+		return NF_ACCEPT;
+
+	hash = clusterip_hashfn_xfrm(x, c);
+	if (clusterip_responsible(c, hash))
+		res = NF_ACCEPT;
+
+	clusterip_config_put(c);
+	return res;
+}
+
+static struct nf_hook_ops cip_xfrm_out_ops __read_mostly = {
+	.hook		= cip_xfrm_out_hook,
+	.owner		= THIS_MODULE,
+	.pf		= PF_INET,
+	.hooknum	= NF_INET_XFRM_OUT,
+	.priority	= -1,
+};
+
+#endif /* CONFIG_XFRM */
+
+/***********************************************************************
  * PROC DIR HANDLING
  ***********************************************************************/
 
@@ -757,16 +973,38 @@ static int __init clusterip_tg_init(void)
 	if (ret < 0)
 		goto cleanup_subsys;
 
-	ret = nf_register_hook(&cip_arp_ops);
+#ifdef CONFIG_XFRM
+	ret = nf_register_hook(&cip_pre_routing_ops);
 	if (ret < 0)
 		goto cleanup_target;
+
+	ret = nf_register_hook(&cip_xfrm_in_ops);
+	if (ret < 0)
+		goto cleanup_pre;
+
+	ret = nf_register_hook(&cip_xfrm_out_ops);
+	if (ret < 0)
+		goto cleanup_xfrm_in;
+#endif /* CONFIG_XFRM */
+
+	ret = nf_register_hook(&cip_arp_ops);
+	if (ret < 0)
+		goto cleanup_xfrm_out;
 
 	pr_info("ClusterIP Version %s loaded successfully\n",
 		CLUSTERIP_VERSION);
 
 	return 0;
 
+cleanup_xfrm_out:
+#ifdef CONFIG_XFRM
+	nf_unregister_hook(&cip_xfrm_out_ops);
+cleanup_xfrm_in:
+	nf_unregister_hook(&cip_xfrm_in_ops);
+cleanup_pre:
+	nf_unregister_hook(&cip_pre_routing_ops);
 cleanup_target:
+#endif /* CONFIG_XFRM */
 	xt_unregister_target(&clusterip_tg_reg);
 cleanup_subsys:
 	unregister_pernet_subsys(&clusterip_net_ops);
@@ -778,6 +1016,11 @@ static void __exit clusterip_tg_exit(void)
 	pr_info("ClusterIP Version %s unloading\n", CLUSTERIP_VERSION);
 
 	nf_unregister_hook(&cip_arp_ops);
+#ifdef CONFIG_XFRM
+	nf_unregister_hook(&cip_pre_routing_ops);
+	nf_unregister_hook(&cip_xfrm_in_ops);
+	nf_unregister_hook(&cip_xfrm_out_ops);
+#endif /* CONFIG_XFRM */
 	xt_unregister_target(&clusterip_tg_reg);
 	unregister_pernet_subsys(&clusterip_net_ops);
 
