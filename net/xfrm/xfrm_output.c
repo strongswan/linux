@@ -50,6 +50,13 @@ static struct dst_entry *skb_dst_pop(struct sk_buff *skb)
 	return child;
 }
 
+static int xfrm_type_output(struct sock *sk, struct sk_buff *skb)
+{
+	struct xfrm_state *x = skb_dst(skb)->xfrm;
+
+	return x->type->output(x, skb);
+}
+
 static int xfrm_output_one(struct sk_buff *skb, int err)
 {
 	struct dst_entry *dst = skb_dst(skb);
@@ -99,8 +106,9 @@ static int xfrm_output_one(struct sk_buff *skb, int err)
 
 		skb_dst_force(skb);
 
-		err = x->type->output(x, skb);
-		if (err == -EINPROGRESS)
+		err = NF_HOOK(dst->ops->family, NF_INET_XFRM_OUT, NULL, skb,
+			      NULL, dst->dev, xfrm_type_output);
+		if (err == -EINPROGRESS || err == -EPERM)
 			goto out;
 
 resume:
