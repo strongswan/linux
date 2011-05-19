@@ -13,6 +13,7 @@
 #include <linux/interrupt.h>
 #include <linux/slab.h>
 #include <linux/module.h>
+#include <linux/netfilter.h>
 #include <linux/netdevice.h>
 #include <linux/percpu.h>
 #include <net/dst.h>
@@ -456,6 +457,15 @@ static int xfrm_inner_mode_input(struct xfrm_state *x,
 	return -EOPNOTSUPP;
 }
 
+static int xfrm_type_input(struct net *net, struct sock *sk,
+			   struct sk_buff *skb)
+{
+	struct xfrm_state *x;
+
+	x = xfrm_input_state(skb);
+	return x->type->input(x, skb);
+}
+
 /* NOTE: encap_type - In addition to the normal (non-negative) values for
  * encap_type, a negative value of -1 or -2 can be used to resume/restart this
  * function after a previous invocation early terminated for async operation.
@@ -654,10 +664,16 @@ lock:
 		if (crypto_done)
 			nexthdr = x->type_offload->input_tail(x, skb);
 		else
-			nexthdr = x->type->input(x, skb);
+			nexthdr = NF_HOOK(family, NF_INET_XFRM_IN, net, NULL, skb,
+					  skb->dev, NULL, xfrm_type_input);
 
 		if (nexthdr == -EINPROGRESS)
 			return 0;
+
+		if (nexthdr == -EPERM) {
+			dev_put(skb->dev);
+			return 0;
+		}
 resume:
 		dev_put(skb->dev);
 
