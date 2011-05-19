@@ -19,8 +19,8 @@ struct netns_nf {
 	struct ctl_table_header *nf_lwtnl_dir_header;
 #endif
 #endif
-	struct nf_hook_entries __rcu *hooks_ipv4[NF_INET_NUMHOOKS];
-	struct nf_hook_entries __rcu *hooks_ipv6[NF_INET_NUMHOOKS];
+	struct nf_hook_entries __rcu *hooks_ipv4[NF_MAX_HOOKS];
+	struct nf_hook_entries __rcu *hooks_ipv6[NF_MAX_HOOKS];
 #ifdef CONFIG_NETFILTER_FAMILY_ARP
 	struct nf_hook_entries __rcu *hooks_arp[NF_ARP_NUMHOOKS];
 #endif
