@@ -48,7 +48,15 @@ enum nf_inet_hooks {
 	NF_INET_FORWARD,
 	NF_INET_LOCAL_OUT,
 	NF_INET_POST_ROUTING,
-	NF_INET_NUMHOOKS
+	NF_INET_NUMHOOKS,
+
+#ifdef __KERNEL__
+	/* not accessible from userspace, keep iptables ABI. */
+	NF_INET_XFRM_IN = NF_INET_NUMHOOKS,
+	NF_INET_XFRM_OUT,
+
+	NF_MAX_HOOKS
+#endif
 };
 
 enum {

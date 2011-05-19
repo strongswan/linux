@@ -37,9 +37,6 @@ static inline void nf_inet_addr_mask(const union nf_inet_addr *a1,
 
 extern void netfilter_init(void);
 
-/* Largest hook number + 1 */
-#define NF_MAX_HOOKS 8
-
 struct sk_buff;
 
 typedef unsigned int nf_hookfn(unsigned int hooknum,
