@@ -9,6 +9,7 @@
 
 #include <linux/slab.h>
 #include <linux/module.h>
+#include <linux/netfilter.h>
 #include <linux/netdevice.h>
 #include <net/dst.h>
 #include <net/ip.h>
@@ -177,6 +178,14 @@ int xfrm_prepare_input(struct xfrm_state *x, struct sk_buff *skb)
 }
 EXPORT_SYMBOL(xfrm_prepare_input);
 
+static int xfrm_type_input(struct sk_buff *skb)
+{
+	struct xfrm_state *x;
+
+	x = skb->sp->xvec[skb->sp->len - 1];
+	return x->type->input(x, skb);
+}
+
 int xfrm_input(struct sk_buff *skb, int nexthdr, __be32 spi, int encap_type)
 {
 	struct net *net = dev_net(skb->dev);
@@ -278,9 +287,10 @@ int xfrm_input(struct sk_buff *skb, int nexthdr, __be32 spi, int encap_type)
 
 		skb_dst_force(skb);
 
-		nexthdr = x->type->input(x, skb);
+		nexthdr = NF_HOOK(family, NF_INET_XFRM_IN, skb,
+				  skb->dev, NULL, xfrm_type_input);
 
-		if (nexthdr == -EINPROGRESS)
+		if (nexthdr == -EINPROGRESS || nexthdr == -EPERM)
 			return 0;
 resume:
 		spin_lock(&x->lock);
