@@ -114,6 +114,23 @@ static int xfrm_replay_overflow(struct xfrm_state *x, struct sk_buff *skb)
 	return err;
 }
 
+static void xfrm_replay_failover(struct xfrm_state *x, int ratio)
+{
+	struct net *net = xs_net(x);
+	u32 incr;
+
+	if (x->type->flags & XFRM_TYPE_REPLAY_PROT) {
+
+		incr = x->replay.oseq / ratio;
+		if (U32_MAX - x->replay.oseq > incr) {
+			x->replay.oseq += incr;
+
+			if (xfrm_aevent_is_on(net))
+				x->repl->notify(x, XFRM_REPLAY_UPDATE);
+		}
+	}
+}
+
 static int xfrm_replay_check(struct xfrm_state *x,
 		      struct sk_buff *skb, __be32 net_seq)
 {
@@ -191,6 +208,24 @@ static int xfrm_replay_overflow_bmp(struct xfrm_state *x, struct sk_buff *skb)
 	}
 
 	return err;
+}
+
+static void xfrm_replay_failover_bmp(struct xfrm_state *x, int ratio)
+{
+	struct xfrm_replay_state_esn *replay_esn = x->replay_esn;
+	struct net *net = xs_net(x);
+	u32 incr;
+
+	if (x->type->flags & XFRM_TYPE_REPLAY_PROT) {
+
+		incr = replay_esn->oseq / ratio;
+		if (U32_MAX - replay_esn->oseq > incr) {
+			replay_esn->oseq += incr;
+
+			if (xfrm_aevent_is_on(net))
+				x->repl->notify(x, XFRM_REPLAY_UPDATE);
+		}
+	}
 }
 
 static int xfrm_replay_check_bmp(struct xfrm_state *x,
@@ -431,6 +466,31 @@ static int xfrm_replay_overflow_esn(struct xfrm_state *x, struct sk_buff *skb)
 	return err;
 }
 
+static void xfrm_replay_failover_esn(struct xfrm_state *x, int ratio)
+{
+	struct xfrm_replay_state_esn *replay_esn = x->replay_esn;
+	struct net *net = xs_net(x);
+	u32 incr;
+
+	if (x->type->flags & XFRM_TYPE_REPLAY_PROT) {
+
+		if (replay_esn->oseq_hi)
+			incr = U32_MAX / ratio;
+		else
+			incr = replay_esn->oseq / ratio;
+		if (U32_MAX - replay_esn->oseq < incr) {
+			replay_esn->oseq_hi++;
+			if (replay_esn->oseq_hi == 0) {
+				replay_esn->oseq_hi--;
+				incr = 0;
+			}
+		}
+		replay_esn->oseq += incr;
+		if (xfrm_aevent_is_on(net))
+			x->repl->notify(x, XFRM_REPLAY_UPDATE);
+	}
+}
+
 static int xfrm_replay_check_esn(struct xfrm_state *x,
 				 struct sk_buff *skb, __be32 net_seq)
 {
@@ -564,6 +624,7 @@ static struct xfrm_replay xfrm_replay_legacy = {
 	.recheck	= xfrm_replay_check,
 	.notify		= xfrm_replay_notify,
 	.overflow	= xfrm_replay_overflow,
+	.failover	= xfrm_replay_failover,
 };
 
 static struct xfrm_replay xfrm_replay_bmp = {
@@ -572,6 +633,7 @@ static struct xfrm_replay xfrm_replay_bmp = {
 	.recheck	= xfrm_replay_check_bmp,
 	.notify		= xfrm_replay_notify_bmp,
 	.overflow	= xfrm_replay_overflow_bmp,
+	.failover	= xfrm_replay_failover_bmp,
 };
 
 static struct xfrm_replay xfrm_replay_esn = {
@@ -580,6 +642,7 @@ static struct xfrm_replay xfrm_replay_esn = {
 	.recheck	= xfrm_replay_recheck_esn,
 	.notify		= xfrm_replay_notify_esn,
 	.overflow	= xfrm_replay_overflow_esn,
+	.failover	= xfrm_replay_failover_esn,
 };
 
 int xfrm_init_replay(struct xfrm_state *x)
