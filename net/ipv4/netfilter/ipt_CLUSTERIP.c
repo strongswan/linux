@@ -241,6 +241,33 @@ clusterip_config_init(const struct ipt_clusterip_tgt_info *i, __be32 ip,
 }
 
 #ifdef CONFIG_PROC_FS
+#ifdef CONFIG_XFRM
+static int
+clusterip_advance_xfrm_seq_one(struct xfrm_state *x, int count, void *data)
+{
+	__be32 clusterip = *(__be32 *)data;
+
+	if (x->repl && x->props.family == AF_INET &&
+	    x->props.saddr.a4 == clusterip) {
+		spin_lock(&x->lock);
+		x->repl->failover(x, 16);
+		spin_unlock(&x->lock);
+	}
+	return 0;
+}
+
+static void
+clusterip_advance_xfrm_seq(__be32 clusterip, u8 proto)
+{
+	struct xfrm_state_walk walk;
+
+	xfrm_state_walk_init(&walk, proto);
+	xfrm_state_walk(&init_net, &walk, clusterip_advance_xfrm_seq_one,
+			&clusterip);
+	xfrm_state_walk_done(&walk);
+}
+#endif /* CONFIG_XFRM */
+
 static int
 clusterip_add_node(struct clusterip_config *c, u_int16_t nodenum)
 {
@@ -912,6 +939,11 @@ static ssize_t clusterip_proc_write(struct file *file, const char __user *input,
 			return -ENOENT;
 	} else
 		return -EIO;
+
+#ifdef CONFIG_XFRM
+	clusterip_advance_xfrm_seq(c->clusterip, IPPROTO_ESP);
+	clusterip_advance_xfrm_seq(c->clusterip, IPPROTO_AH);
+#endif /* CONFIG_XFRM */
 
 	return size;
 }
