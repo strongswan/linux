@@ -118,6 +118,23 @@ static int __xfrm_replay_overflow(struct xfrm_state *x, struct sk_buff *skb)
 	return err;
 }
 
+static void xfrm_replay_failover_legacy(struct xfrm_state *x, int ratio)
+{
+	struct net *net = xs_net(x);
+	u32 incr;
+
+	if (x->type->flags & XFRM_TYPE_REPLAY_PROT) {
+
+		incr = x->replay.oseq / ratio;
+		if (U32_MAX - x->replay.oseq > incr) {
+			x->replay.oseq += incr;
+
+			if (xfrm_aevent_is_on(net))
+				xfrm_replay_notify(x, XFRM_REPLAY_UPDATE);
+		}
+	}
+}
+
 static int xfrm_replay_check_legacy(struct xfrm_state *x,
 				    struct sk_buff *skb, __be32 net_seq)
 {
@@ -208,6 +225,24 @@ static int xfrm_replay_overflow_bmp(struct xfrm_state *x, struct sk_buff *skb)
 	}
 
 	return err;
+}
+
+static void xfrm_replay_failover_bmp(struct xfrm_state *x, int ratio)
+{
+	struct xfrm_replay_state_esn *replay_esn = x->replay_esn;
+	struct net *net = xs_net(x);
+	u32 incr;
+
+	if (x->type->flags & XFRM_TYPE_REPLAY_PROT) {
+
+		incr = replay_esn->oseq / ratio;
+		if (U32_MAX - replay_esn->oseq > incr) {
+			replay_esn->oseq += incr;
+
+			if (xfrm_aevent_is_on(net))
+				xfrm_replay_notify(x, XFRM_REPLAY_UPDATE);
+		}
+	}
 }
 
 static int xfrm_replay_check_bmp(struct xfrm_state *x,
@@ -446,6 +481,46 @@ static int xfrm_replay_overflow_esn(struct xfrm_state *x, struct sk_buff *skb)
 	}
 
 	return err;
+}
+
+static void xfrm_replay_failover_esn(struct xfrm_state *x, int ratio)
+{
+	struct xfrm_replay_state_esn *replay_esn = x->replay_esn;
+	struct net *net = xs_net(x);
+	u32 incr;
+
+	if (x->type->flags & XFRM_TYPE_REPLAY_PROT) {
+
+		if (replay_esn->oseq_hi)
+			incr = U32_MAX / ratio;
+		else
+			incr = replay_esn->oseq / ratio;
+		if (U32_MAX - replay_esn->oseq < incr) {
+			replay_esn->oseq_hi++;
+			if (replay_esn->oseq_hi == 0) {
+				replay_esn->oseq_hi--;
+				incr = 0;
+			}
+		}
+		replay_esn->oseq += incr;
+		if (xfrm_aevent_is_on(net))
+			xfrm_replay_notify(x, XFRM_REPLAY_UPDATE);
+	}
+}
+
+void xfrm_replay_failover(struct xfrm_state *x, int ratio)
+{
+	switch (x->repl_mode) {
+	case XFRM_REPLAY_MODE_LEGACY:
+		xfrm_replay_failover_legacy(x, ratio);
+		break;
+	case XFRM_REPLAY_MODE_BMP:
+		xfrm_replay_failover_bmp(x, ratio);
+		break;
+	case XFRM_REPLAY_MODE_ESN:
+		xfrm_replay_failover_esn(x, ratio);
+		break;
+	}
 }
 
 static int xfrm_replay_check_esn(struct xfrm_state *x,

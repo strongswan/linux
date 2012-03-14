@@ -1738,6 +1738,7 @@ int xfrm_replay_check(struct xfrm_state *x, struct sk_buff *skb, __be32 net_seq)
 void xfrm_replay_notify(struct xfrm_state *x, int event);
 int xfrm_replay_overflow(struct xfrm_state *x, struct sk_buff *skb);
 int xfrm_replay_recheck(struct xfrm_state *x, struct sk_buff *skb, __be32 net_seq);
+void xfrm_replay_failover(struct xfrm_state *x, int ratio);
 
 static inline int xfrm_aevent_is_on(struct net *net)
 {
