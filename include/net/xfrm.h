@@ -292,6 +292,7 @@ struct xfrm_replay {
 			   __be32 net_seq);
 	void	(*notify)(struct xfrm_state *x, int event);
 	int	(*overflow)(struct xfrm_state *x, struct sk_buff *skb);
+	void	(*failover)(struct xfrm_state *x, int ratio);
 };
 
 struct xfrm_if_cb {
