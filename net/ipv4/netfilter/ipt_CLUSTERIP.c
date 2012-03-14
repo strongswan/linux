@@ -47,6 +47,7 @@ struct clusterip_config {
 	refcount_t entries;			/* number of entries/rules
 						 * referencing us */
 
+	struct net *net;			/* network namespace */
 	__be32 clusterip;			/* the IP address */
 	u_int8_t clustermac[ETH_ALEN];		/* the MAC address */
 	int ifindex;				/* device ifindex */
@@ -251,6 +252,7 @@ clusterip_config_init(struct net *net, const struct ipt_clusterip_tgt_info *i,
 	if (!c)
 		return ERR_PTR(-ENOMEM);
 
+	c->net = net;
 	strcpy(c->ifname, iniface);
 	c->ifindex = -1;
 	c->clusterip = ip;
@@ -307,6 +309,32 @@ err:
 }
 
 #ifdef CONFIG_PROC_FS
+#ifdef CONFIG_XFRM
+static int
+clusterip_advance_xfrm_seq_one(struct xfrm_state *x, int count, void *data)
+{
+	struct clusterip_config *c = data;
+
+	if (x->repl && x->props.family == AF_INET &&
+	    x->props.saddr.a4 == c->clusterip) {
+		spin_lock(&x->lock);
+		x->repl->failover(x, 16);
+		spin_unlock(&x->lock);
+	}
+	return 0;
+}
+
+static void
+clusterip_advance_xfrm_seq(struct clusterip_config *c, u8 proto)
+{
+	struct xfrm_state_walk walk;
+
+	xfrm_state_walk_init(&walk, proto, NULL);
+	xfrm_state_walk(c->net, &walk, clusterip_advance_xfrm_seq_one, c);
+	xfrm_state_walk_done(&walk, c->net);
+}
+#endif /* CONFIG_XFRM */
+
 static int
 clusterip_add_node(struct clusterip_config *c, u_int16_t nodenum)
 {
@@ -968,6 +996,11 @@ static ssize_t clusterip_proc_write(struct file *file, const char __user *input,
 			return -ENOENT;
 	} else
 		return -EIO;
+
+#ifdef CONFIG_XFRM
+	clusterip_advance_xfrm_seq(c, IPPROTO_ESP);
+	clusterip_advance_xfrm_seq(c, IPPROTO_AH);
+#endif /* CONFIG_XFRM */
 
 	return size;
 }
