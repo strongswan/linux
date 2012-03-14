@@ -350,17 +350,17 @@ clusterip_add_node(struct clusterip_config *c, u_int16_t nodenum)
 	return 0;
 }
 
-static bool
+static int
 clusterip_del_node(struct clusterip_config *c, u_int16_t nodenum)
 {
 	if (nodenum == 0 ||
 	    nodenum > c->num_total_nodes)
-		return true;
+		return 1;
 
-	if (test_and_clear_bit(nodenum - 1, &c->local_nodes))
-		return false;
+	if (!test_and_clear_bit(nodenum - 1, &c->local_nodes))
+		return 1;
 
-	return true;
+	return 0;
 }
 #endif
 
