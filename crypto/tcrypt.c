@@ -1484,6 +1484,22 @@ static int do_test(const char *alg, u32 type, u32 mask, int m)
 		ret += tcrypt_test("crct10dif");
 		break;
 
+	case 48:
+		ret += tcrypt_test("chacha20");
+		break;
+
+	case 49:
+		ret += tcrypt_test("poly1305");
+		break;
+
+	case 50:
+		ret += tcrypt_test("rfc7539(chacha20,poly1305)");
+		break;
+
+	case 51:
+		ret += tcrypt_test("rfc7539esp(chacha20,poly1305)");
+		break;
+
 	case 100:
 		ret += tcrypt_test("hmac(md5)");
 		break;
