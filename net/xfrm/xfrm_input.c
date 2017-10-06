@@ -134,6 +134,8 @@ struct sec_path *secpath_set(struct sk_buff *skb)
 	sp->len = 0;
 	sp->verified_cnt = 0;
 
+	sp->dropit = false;
+
 	return sp;
 }
 EXPORT_SYMBOL(secpath_set);
