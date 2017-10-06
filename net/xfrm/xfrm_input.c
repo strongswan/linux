@@ -125,6 +125,7 @@ struct sec_path *secpath_set(struct sk_buff *skb)
 	memset(sp->ovec, 0, sizeof(sp->ovec));
 	sp->olen = 0;
 	sp->len = 0;
+	sp->dropit = false;
 
 	return sp;
 }
@@ -408,6 +409,10 @@ resume:
 		}
 
 		x->repl->advance(x, seq);
+
+		sp = skb_sec_path(skb);
+		if (sp && sp->dropit)
+			goto drop_unlock;
 
 		x->curlft.bytes += skb->len;
 		x->curlft.packets++;
