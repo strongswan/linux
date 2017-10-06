@@ -108,6 +108,7 @@ struct sec_path *secpath_dup(struct sec_path *src)
 
 	sp->len = 0;
 	sp->olen = 0;
+	sp->dropit = false;
 
 	memset(sp->ovec, 0, sizeof(sp->ovec[XFRM_MAX_OFFLOAD_DEPTH]));
 
@@ -397,6 +398,9 @@ resume:
 		}
 
 		x->repl->advance(x, seq);
+
+		if (skb->sp->dropit)
+			goto drop_unlock;
 
 		x->curlft.bytes += skb->len;
 		x->curlft.packets++;
