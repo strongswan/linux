@@ -981,6 +981,7 @@ void xfrm_dst_ifdown(struct dst_entry *dst, struct net_device *dev);
 struct sec_path {
 	atomic_t		refcnt;
 	int			len;
+	bool		dropit;
 	struct xfrm_state	*xvec[XFRM_MAX_DEPTH];
 };
 
