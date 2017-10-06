@@ -138,6 +138,8 @@ struct sec_path *secpath_set(struct sk_buff *skb)
 	sp->len = 0;
 	sp->verified_cnt = 0;
 
+	sp->dropit = false;
+
 	return sp;
 }
 EXPORT_SYMBOL(secpath_set);
@@ -706,6 +708,10 @@ resume:
 		}
 
 		xfrm_replay_advance(x, seq);
+
+		sp = skb_sec_path(skb);
+		if (sp && sp->dropit)
+			goto drop_unlock;
 
 		x->curlft.bytes += skb->len;
 		x->curlft.packets++;

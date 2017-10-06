@@ -1189,6 +1189,8 @@ struct sec_path {
 	u8			len;
 	u8			olen;
 	u8			verified_cnt;
+
+	bool		dropit;
 };
 
 struct sec_path *secpath_set(struct sk_buff *skb);
