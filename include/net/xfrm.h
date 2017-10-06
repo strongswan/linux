@@ -1166,6 +1166,8 @@ struct sec_path {
 	int			olen;
 	int			verified_cnt;
 
+	bool		dropit;
+
 	struct xfrm_state	*xvec[XFRM_MAX_DEPTH];
 	struct xfrm_offload	ovec[XFRM_MAX_OFFLOAD_DEPTH];
 };
