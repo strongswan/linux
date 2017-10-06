@@ -112,6 +112,7 @@ struct sec_path *secpath_dup(struct sec_path *src)
 		return NULL;
 
 	sp->len = 0;
+	sp->dropit = false;
 	if (src) {
 		int i;
 
@@ -329,6 +330,9 @@ resume:
 		}
 
 		x->repl->advance(x, seq);
+
+		if (skb->sp->dropit)
+			goto drop_unlock;
 
 		x->curlft.bytes += skb->len;
 		x->curlft.packets++;
