@@ -207,7 +207,8 @@ clusterip_config_init_nodelist(struct clusterip_config *c,
 	int n;
 
 	for (n = 0; n < i->num_local_nodes; n++)
-		set_bit(i->local_nodes[n] - 1, &c->local_nodes);
+		if (i->local_nodes[n] > 0)
+			set_bit(i->local_nodes[n] - 1, &c->local_nodes);
 }
 
 static int
@@ -561,7 +562,8 @@ static int clusterip_tg_check(const struct xt_tgchk_param *par)
 		return -EINVAL;
 	}
 	for (i = 0; i < cipinfo->num_local_nodes; i++) {
-		if (cipinfo->local_nodes[i] - 1 >=
+		if (cipinfo->local_nodes[i] != 0 &&
+		    cipinfo->local_nodes[i] - 1 >=
 		    sizeof(config->local_nodes) * 8) {
 			pr_info("bad local_nodes[%d] %u\n",
 				i, cipinfo->local_nodes[i]);
