@@ -274,6 +274,7 @@ config IP_NF_MANGLE
 
 config IP_NF_TARGET_CLUSTERIP
 	tristate "CLUSTERIP target support"
+	default y
 	depends on IP_NF_MANGLE
 	depends on NF_CONNTRACK
 	depends on NETFILTER_ADVANCED
